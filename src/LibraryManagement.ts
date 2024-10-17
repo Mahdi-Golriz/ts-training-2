@@ -1,90 +1,138 @@
 import type {
   IBook,
-  ILibrary,
   ILibraryImplementation,
   ISearchableItem,
   IUser,
 } from "./Models.js";
 import { Category } from "./Models.js";
 import StoreManagement from "./store.js";
-import { userExistsInLibrary } from "./UserManagement.js";
 
 class Library implements ILibraryImplementation {
   libraryId: number;
-  name: string;
-  address: string;
-  books: IBook[] = [];
 
-  constructor(library: ILibrary) {
-    const { id, name, address } = library;
-    this.libraryId = id;
-    this.name = name;
-    this.address = address;
+  constructor(libraryId: number) {
+    this.libraryId = libraryId;
   }
 
   addBook(book: IBook): void {
-    this.books = [...this.books, book];
+    const result = StoreManagement.Instance.addBookToLibrary(
+      this.libraryId,
+      book
+    );
+    if (!result) {
+      console.log("Failed to add book to library");
+    } else {
+      console.log("Book added to lirary successfully");
+    }
   }
 
   removeBook(isbn: number): void {
-    this.books = this.books.filter((book) => book.isbn !== isbn);
+    const result = StoreManagement.Instance.removeBookFromLibrary(
+      this.libraryId,
+      isbn
+    );
+    if (!result) {
+      console.log("Failed to remove the book from the library.");
+    } else {
+      console.log("Book removed from lirary successfully");
+    }
   }
 
   findBookByISBN(isbn: number): IBook | undefined {
-    return this.books.find((value) => value.isbn === isbn);
+    const library = StoreManagement.Instance.getLibrary(this.libraryId);
+    if (!library) {
+      console.log(`Cannot find specified: ${this.libraryId}`);
+      return;
+    }
+
+    return library.books.find((item) => item.isbn === isbn);
   }
 
-  listAccessibleBooks(): IBook[] {
-    return this.books.filter((book) => book.isAvailable);
+  isBookAvailable(): IBook[] {
+    const library = StoreManagement.Instance.getLibrary(this.libraryId);
+
+    if (!library) {
+      console.log(`Cannot find specified: ${this.libraryId}`);
+      return [];
+    }
+
+    return library.books;
   }
 
-  updateBook(isbn: number, bookDetails: Partial<IBook>): void {
-    this.books = this.books.map((book) =>
-      book.isbn === isbn ? { ...book, ...bookDetails } : book
+  isBookBorrowed(libraryId: number, isbn: number): boolean {
+    const borrowedBooksFromLibrary =
+      StoreManagement.Instance.getBorrowedBooksFromLibrary(libraryId);
+
+    if (!borrowedBooksFromLibrary) {
+      console.log("Failed to check! change the LibraryId!");
+      return true;
+    }
+
+    const result = Object.values(borrowedBooksFromLibrary).some((item) =>
+      item.some((book) => book.isbn === isbn)
+    );
+
+    if (result) {
+      console.log("Your requested book was borrowed to someone!");
+      return true;
+    }
+
+    return false;
+  }
+
+  userExistsInLibrary(userId: number, libraryId: number) {
+    return StoreManagement.Instance.getLibraryUsers[libraryId].some(
+      (item) => item === userId
     );
   }
 
+  borrowedMorethanThree(userId: number): boolean {
+    const allBorrowedBooks = StoreManagement.Instance.getLibraries.map(
+      (item) => item.borrowedBooks
+    );
+
+    if (!allBorrowedBooks.length) return false;
+
+    const relatedBorrowedBooks = allBorrowedBooks.filter(
+      (i) => i[userId]
+      // Object.keys(i).some((key) => +key === userId)
+    );
+
+    const totalBorrowed =
+      relatedBorrowedBooks.reduce((acc, cur) => acc + cur[userId].length, 0) >=
+      3;
+    return totalBorrowed;
+  }
+
   borrowBook(isbn: number, user: IUser): void {
-    if (!userExistsInLibrary(this.libraryId, user.userId)) {
-      console.log("You are not a member of this Library");
+    if (!this.userExistsInLibrary(this.libraryId, user.userId)) {
       return;
     }
     console.log("Congrats! You are a member of this Library");
 
-    const isAvailable = this.findBookByISBN(isbn);
-    if (!isAvailable) {
-      console.log("Your requested book is not available in this Library");
+    const requestedBook = this.findBookByISBN(isbn);
+    if (!requestedBook) {
+      console.log("Your requested book is not registered in this Library");
       return;
     }
+    console.log("Your requested book is registered in this Library");
 
-    const isAccessible = this.listAccessibleBooks().some(
-      (item) => item.isbn === isbn
-    );
-
-    if (!isAccessible) {
-      console.log("Your requested book is borrowed to someone else!");
+    if (this.isBookBorrowed(this.libraryId, isbn)) {
       return;
     }
+    console.log("Your requested book is now in the library!");
 
+    if (this.borrowedMorethanThree(user.userId)) {
+      console.log("Your have borrowed more than three books!");
+      return;
+    }
     console.log("You can get this book");
-    this.updateBook(isbn, { isAvailable: false });
-  }
 
-  borrowedBooks(): void {
-    const unAccessibleBooks = this.books.filter(
-      (book) => book.isAvailable === false
+    StoreManagement.Instance.borrowBookToUser(
+      this.libraryId,
+      user.userId,
+      requestedBook
     );
-
-    if (unAccessibleBooks.length === 0) {
-      console.log("All books are accessible");
-    } else {
-      console.log(unAccessibleBooks);
-    }
-  }
-
-  libraryUsers() {
-    const libUsers = StoreManagement.Instance.libraryUsers[this.libraryId];
-    console.log(libUsers);
   }
 
   logItem<T>(item: T): void {
@@ -105,52 +153,5 @@ class Library implements ILibraryImplementation {
     return book.category;
   }
 }
-
-// const MyLibraryInstace = new Library(librariesId.A, "A", "20111");
-
-// MyLibraryInstace.addBook({
-//   title: "1984",
-//   author: "Orwell",
-//   isbn: 10,
-//   isAvailable: true,
-//   pages: 100,
-//   category: Category.Fiction,
-// });
-// MyLibraryInstace.addBook({
-//   title: "The Lord of the Rings",
-//   author: "Ronald",
-//   isbn: 11,
-//   isAvailable: true,
-//   pages: 120,
-//   category: Category.Fiction,
-// });
-// MyLibraryInstace.addBook({
-//   title: "War and Peace",
-//   author: "Leo Tolstoy",
-//   isbn: 12,
-//   isAvailable: true,
-//   pages: 160,
-//   category: Category.NonFiction,
-// });
-// MyLibraryInstace.addBook({
-//   title: "Hamlet",
-//   author: "Shakespeare",
-//   isbn: 13,
-//   isAvailable: true,
-//   pages: 220,
-//   category: Category.Science,
-// });
-
-// console.log(MyLibraryInstace.listAvailabeBooks());
-
-// MyLibraryInstace.borrowedBooks();
-
-// MyLibraryInstace.borrowBook(10, { name: "mahdi", userId: 1 });
-
-// MyLibraryInstace.borrowedBooks();
-
-// MyLibraryInstace.borrowBook(10, { name: "reza", userId: 2 });
-
-// MyLibraryInstace.libraryUsers();
 
 export default Library;
